@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UWB Config — BLE</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2129; --border: #2c3742;
+    --text: #e6edf3; --muted: #8b98a5; --accent: #4da3ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+    max-width: 760px; margin-inline: auto;
+  }
+  h1 { font-size: 20px; margin: 8px 0 16px; }
+  h1 small { color: var(--muted); font-weight: normal; font-size: 13px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .row:last-child { margin-bottom: 0; }
+  button {
+    background: #232d38; color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 8px 14px; font-size: 14px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #04101f; font-weight: 600; }
+  button.danger { background: #3d1d20; border-color: var(--err); color: var(--err); }
+  select, input[type=text] {
+    background: #10161c; color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 8px 10px; font-size: 14px;
+  }
+  input[type=text] { flex: 1; min-width: 120px; font-family: ui-monospace, monospace; }
+  #status { display: inline-flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .dot.connected { background: var(--ok); }
+  .dot.connecting { background: var(--warn); }
+  #log {
+    background: #0a0e12; border: 1px solid var(--border); border-radius: 7px;
+    padding: 10px; height: 260px; overflow-y: auto;
+    font: 12.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  #log .tx { color: var(--accent); }
+  #log .rx { color: var(--text); }
+  #log .rx.ack { color: var(--ok); }
+  #log .rx.err { color: var(--err); }
+  #log .sys { color: var(--muted); font-style: italic; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 16px; font-size: 14px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-family: ui-monospace, monospace; }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  #unsupported { display: none; border-color: var(--err); color: var(--err); }
+</style>
+</head>
+<body>
+
+<h1>UWB Config <small>— fenêtre admin BLE (NUS)</small></h1>
+
+<div class="card" id="unsupported">
+  Web Bluetooth non disponible. Utiliser Chrome ou Edge (macOS, Windows, Linux, Android),
+  et servir la page en HTTPS ou depuis localhost.
+</div>
+
+<div class="card">
+  <div class="row">
+    <button id="btnConnect" class="primary">Connecter</button>
+    <button id="btnDisconnect" disabled>Déconnecter</button>
+    <span id="status"><span class="dot" id="dot"></span><span id="statusText">Déconnecté</span></span>
+  </div>
+  <div class="note">
+    Le boîtier n'est visible en BLE que pendant sa fenêtre admin au boot.
+    Power-cycle le boîtier puis clique Connecter. Après une commande, le firmware
+    ACK, se déconnecte et repart en mode UWB — c'est le comportement attendu.
+  </div>
+</div>
+
+<div class="card">
+  <h2>État du boîtier</h2>
+  <dl class="kv">
+    <dt>Nom</dt><dd id="stName">—</dd>
+    <dt>Rôle</dt><dd id="stRole">—</dd>
+    <dt>Firmware</dt><dd id="stFw">—</dd>
+    <dt>Profil UWB</dt><dd id="stProfile">—</dd>
+    <dt>TX power</dt><dd id="stTxpwr">—</dd>
+    <dt>Armement</dt><dd id="stArm">—</dd>
+  </dl>
+  <div class="row" style="margin-top:10px">
+    <button id="btnRefresh" disabled>Lire l'état</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Paramètres</h2>
+  <div class="row">
+    <label>Nom</label>
+    <input type="text" id="nameInput" placeholder="1-15 car. A-Z a-z 0-9 - _" maxlength="15" disabled>
+    <button id="btnSetName" disabled>Renommer</button>
+  </div>
+  <div class="row">
+    <label>Profil</label>
+    <select id="selProfile">
+      <option value="35">35 — CH5 · 6M8 · PLEN128 (défaut)</option>
+      <option value="36">36 — CH9 · 6M8 · PLEN128</option>
+      <option value="37">37 — CH5 · 6M8 · PLEN256</option>
+      <option value="38">38 — CH5 · 6M8 · PLEN512</option>
+      <option value="40">40 — CH5 · 850k · PLEN1024</option>
+    </select>
+    <button id="btnSetProfile" disabled>Appliquer</button>
+  </div>
+  <div class="row">
+    <label>TX power</label>
+    <select id="selTxpwr">
+      <option value="0">0 — minimum</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4" selected>4 — défaut</option>
+    </select>
+    <button id="btnSetTxpwr" disabled>Appliquer</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Logique de déclenchement (persistée en flash)</h2>
+  <div id="ruleRows"></div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnRuleAdd" disabled>+ Condition</button>
+    <button id="btnRuleArm" disabled>Armer</button>
+    <button id="btnDisarm" disabled>Désarmer</button>
+  </div>
+  <div class="row">
+    <button id="btnFire" class="danger" disabled>Tester la mise à feu</button>
+    <button id="btnDfu" disabled>Redémarrer en DFU</button>
+  </div>
+  <div class="note">Chaque condition doit rester vraie pendant sa durée (0 = immédiat).
+    ET = conditions simultanées (prioritaire sur OU). Inclinaison mesurée par rapport à la verticale.
+    Après armement, le boîtier reset et saute la fenêtre BLE au boot suivant tant qu'il est armé.</div>
+</div>
+
+<div class="card">
+  <h2>Mise à jour firmware (OTA)</h2>
+  <div class="row">
+    <input type="file" id="dfuFile" accept=".zip" style="color:var(--muted)">
+  </div>
+  <div class="row">
+    <button id="btnDfuStart" disabled>Mettre à jour</button>
+    <span id="dfuStatus" class="note"></span>
+  </div>
+  <div class="row">
+    <progress id="dfuProgress" max="100" value="0" style="width:100%;display:none"></progress>
+  </div>
+  <div class="note">Package .zip signé (nrfutil). Étape 1 : redémarre le boîtier en mode DFU.
+    Étape 2 : choisir « UWBR_DFU » dans la fenêtre Bluetooth pour flasher.
+    Les captures boîte noire peuvent être perdues pendant la mise à jour.</div>
+</div>
+
+<div class="card">
+  <h2>Boîte noire — déclenchements enregistrés</h2>
+  <div class="row">
+    <button id="btnLogList" disabled>Lister les déclenchements</button>
+    <button id="btnLogClear" class="danger" disabled>Tout effacer</button>
+    <span id="logStatus" class="note"></span>
+  </div>
+  <div id="logSlots" style="margin-top:8px"></div>
+  <div class="note">Une capture est créée à chaque déclenchement de la règle (ou
+    « Tester la mise à feu ») : ~4,5 s avant + ~0,5 s après, à pleine cadence,
+    avec distance UWB + accéléromètres émetteur et récepteur. 3 emplacements en rotation.</div>
+</div>
+
+<div class="card">
+  <h2>Console</h2>
+  <div id="log"></div>
+  <div class="row" style="margin-top:8px">
+    <input type="text" id="cmdInput" placeholder="Commande brute (ex: CFG,GET_ROLE)" disabled>
+    <button id="btnSend" disabled>Envoyer</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const NUS_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_RX      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // write
+const NUS_TX      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // notify
+
+let device = null, rxChar = null, rxBuffer = "";
+
+const $ = id => document.getElementById(id);
+const logEl = $("log");
+const connectedButtons = ["btnDisconnect","btnRefresh","btnSetProfile","btnSetTxpwr",
+  "btnRuleAdd","btnRuleArm","btnDisarm","btnFire","btnDfu","btnSend","cmdInput",
+  "btnSetName","nameInput","btnLogList","btnLogClear"];
+
+if (!navigator.bluetooth) $("unsupported").style.display = "block";
+
+function log(text, cls) {
+  const line = document.createElement("div");
+  line.className = cls;
+  line.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setState(state, label) {
+  $("dot").className = "dot " + state;
+  $("statusText").textContent = label;
+  const on = state === "connected";
+  connectedButtons.forEach(id => $(id).disabled = !on);
+  $("btnConnect").disabled = on || state === "connecting";
+}
+
+function handleLine(text) {
+  // Boîte noire : lignes de données brutes (haute fréquence, pas de console)
+  if (logRead.active && (text.startsWith("L,") || text.startsWith("LOG,BEGIN") || text.startsWith("LOG,END"))) {
+    handleLogLine(text);
+    return;
+  }
+  if (text.startsWith("LOG,SLOT,") || text === "LOG,END") {
+    handleLogListLine(text);
+    return;
+  }
+  const cls = text.startsWith("ACK") ? "rx ack" : text.startsWith("ERR") ? "rx err" : "rx";
+  log(text, cls);
+  // Mise à jour de l'état affiché
+  if (text.startsWith("ROLE,"))            $("stRole").textContent = text.slice(5);
+  else if (text.startsWith("FW,"))         { const p = text.slice(3).split(","); $("stFw").textContent = `v${p[0]} (${p[1] || "?"})`; }
+  else if (text.startsWith("NAME,"))       { $("stName").textContent = text.slice(5); $("nameInput").value = text.slice(5); }
+  else if (text.startsWith("PROFILE,"))    $("stProfile").textContent = text.slice(8);
+  else if (text.startsWith("TXPWR,"))      $("stTxpwr").textContent = text.slice(6);
+  else if (text.startsWith("ARM,RULE,")) $("stArm").textContent = ruleToText(text.slice(9));
+  else if (text.startsWith("ARM,") && !text.startsWith("ARM,WRITE")) $("stArm").textContent = text.slice(4);
+  else if (text.startsWith("ACK,TXPWR,"))  $("stTxpwr").textContent = text.split(",")[2];
+  else if (text.startsWith("ACK,PROFILE_SWITCH_ARMED,")) $("stProfile").textContent = text.split(",")[2];
+  else if (text.startsWith("ACK,ARM,")) {
+    $("stArm").textContent = text.split(",")[2];
+    if (text.includes("SAVED")) log("Sauvegardé — le boîtier redémarre et se déconnecte", "sys");
+  }
+  else if (text.startsWith("ACK,NAME,"))   $("stName").textContent = text.split(",")[2];
+}
+
+function onNotify(event) {
+  rxBuffer += new TextDecoder().decode(event.target.value);
+  let idx;
+  while ((idx = rxBuffer.indexOf("\n")) >= 0) {
+    const line = rxBuffer.slice(0, idx).replace(/\r$/, "").trim();
+    rxBuffer = rxBuffer.slice(idx + 1);
+    if (line) handleLine(line);
+  }
+}
+
+function onDisconnected() {
+  setState("", "Déconnecté");
+  log("Boîtier déconnecté (retour en mode UWB si commande envoyée)", "sys");
+  device = null; rxChar = null; rxBuffer = "";
+}
+
+async function connect() {
+  try {
+    setState("connecting", "Recherche…");
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [NUS_SERVICE] }],
+      optionalServices: [NUS_SERVICE, DFU_SERVICE],
+    });
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+    setState("connecting", "Connexion GATT…");
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(NUS_SERVICE);
+    const txChar = await service.getCharacteristic(NUS_TX);
+    rxChar = await service.getCharacteristic(NUS_RX);
+    await txChar.startNotifications();
+    txChar.addEventListener("characteristicvaluechanged", onNotify);
+    setState("connected", `Connecté à ${device.name || "UWB"}`);
+    log(`Connecté à ${device.name || "UWB"}`, "sys");
+    await refresh();
+  } catch (e) {
+    setState("", "Déconnecté");
+    if (e.name !== "NotFoundError") log(`Erreur: ${e.message}`, "rx err");
+  }
+}
+
+/* Web Bluetooth n'autorise qu'une écriture GATT à la fois : file d'attente.
+ * Fragments de 20 octets max (MTU BLE 23 par défaut, pas de long-write NUS) ;
+ * le firmware réassemble jusqu'au \n. */
+let sendQueue = Promise.resolve();
+function send(cmd) {
+  if (!rxChar) return Promise.resolve();
+  sendQueue = sendQueue.then(async () => {
+    if (!rxChar) return;
+    log(`> ${cmd}`, "tx");
+    try {
+      const bytes = new TextEncoder().encode(cmd + "\n");
+      for (let off = 0; off < bytes.length; off += 20) {
+        await Promise.race([
+          rxChar.writeValue(bytes.slice(off, off + 20)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout écriture (10 s)")), 10000)),
+        ]);
+      }
+    } catch (e) {
+      log(`Erreur envoi: ${e.message}`, "rx err");
+    }
+  });
+  return sendQueue;
+}
+
+async function refresh() {
+  for (const cmd of ["CFG,GET_NAME", "CFG,GET_ROLE", "CFG,GET_FW", "CFG,GET_PROFILE", "CFG,GET_TXPWR", "ARM,GET"]) {
+    await send(cmd);
+    await new Promise(r => setTimeout(r, 150));
+  }
+}
+
+$("btnConnect").onclick = connect;
+$("btnDisconnect").onclick = () => device?.gatt.disconnect();
+$("btnRefresh").onclick = refresh;
+$("btnSetProfile").onclick = () => send(`CFG,PROFILE,${$("selProfile").value}`);
+$("btnSetName").onclick = () => {
+  const name = $("nameInput").value.trim();
+  if (!/^[A-Za-z0-9_-]{1,15}$/.test(name)) {
+    log("Nom invalide: 1-15 caractères A-Z a-z 0-9 - _", "rx err");
+    return;
+  }
+  send(`CFG,NAME,${name}`);
+};
+$("btnSetTxpwr").onclick = () => send(`CFG,TXPWR,${$("selTxpwr").value}`);
+
+// --- Builder de logique de déclenchement ---
+let ruleConds = [{ src: "DIST", op: "GT", val: 2.0, ms: 0, link: "END" }];
+
+function ruleUnit(src) { return src === "TILT" ? "°" : "m"; }
+
+function renderRule() {
+  const host = $("ruleRows");
+  host.innerHTML = "";
+  ruleConds.forEach((c, i) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.marginTop = "6px";
+    row.innerHTML = `
+      ${i > 0 ? `<select data-i="${i - 1}" data-k="link">
+        <option value="AND"${ruleConds[i - 1].link === "AND" ? " selected" : ""}>ET</option>
+        <option value="OR"${ruleConds[i - 1].link === "OR" ? " selected" : ""}>OU</option>
+      </select>` : `<span style="color:var(--muted)">Si</span>`}
+      <select data-i="${i}" data-k="src">
+        <option value="DIST"${c.src === "DIST" ? " selected" : ""}>Distance</option>
+        <option value="TILT"${c.src === "TILT" ? " selected" : ""}>Inclinaison</option>
+      </select>
+      <select data-i="${i}" data-k="op">
+        <option value="GT"${c.op === "GT" ? " selected" : ""}>&gt;</option>
+        <option value="LT"${c.op === "LT" ? " selected" : ""}>&lt;</option>
+      </select>
+      <input type="number" data-i="${i}" data-k="val" value="${c.val}" step="0.1" min="0" style="width:70px">
+      <span style="color:var(--muted)">${ruleUnit(c.src)} pendant</span>
+      <input type="number" data-i="${i}" data-k="ms" value="${c.ms}" step="50" min="0" style="width:80px">
+      <span style="color:var(--muted)">ms</span>
+      ${ruleConds.length > 1 ? `<button data-del="${i}" title="Supprimer">✕</button>` : ""}`;
+    host.appendChild(row);
+  });
+  host.querySelectorAll("select,input").forEach(el => {
+    el.onchange = () => {
+      const i = +el.dataset.i, k = el.dataset.k;
+      if (k === "val" || k === "ms") ruleConds[i][k] = parseFloat(el.value) || 0;
+      else ruleConds[i][k] = el.value;
+      if (k === "src") renderRule();
+    };
+  });
+  host.querySelectorAll("button[data-del]").forEach(btn => {
+    btn.onclick = () => {
+      ruleConds.splice(+btn.dataset.del, 1);
+      ruleConds[ruleConds.length - 1].link = "END";
+      renderRule();
+    };
+  });
+}
+renderRule();
+
+$("btnRuleAdd").onclick = () => {
+  if (ruleConds.length >= 8) { log("8 conditions maximum", "rx err"); return; }
+  ruleConds[ruleConds.length - 1].link = "AND";
+  ruleConds.push({ src: "TILT", op: "GT", val: 50, ms: 0, link: "END" });
+  renderRule();
+};
+
+$("btnRuleArm").onclick = () => {
+  const parts = [];
+  for (let i = 0; i < ruleConds.length; i++) {
+    const c = ruleConds[i];
+    if (!(c.val >= 0) || !(c.ms >= 0)) { log("Valeur de condition invalide", "rx err"); return; }
+    parts.push(`${c.src},${c.op},${c.val},${Math.round(c.ms)}`);
+    if (i < ruleConds.length - 1) parts.push(c.link === "OR" ? "OR" : "AND");
+  }
+  send(`ARM,RULE,${parts.join(",")}`);
+};
+
+// Décode "RULE,DIST,GT,2.00,500,AND,..." en français + recharge le builder
+function ruleToText(payload) {
+  const p = payload.split(",");
+  const conds = [];
+  const out = [];
+  for (let i = 0; i < p.length;) {
+    const src = p[i], op = p[i + 1], val = parseFloat(p[i + 2]), ms = parseInt(p[i + 3], 10);
+    if (!src || !op || isNaN(val) || isNaN(ms)) break;
+    out.push(`${src === "TILT" ? "Incl." : "Dist."} ${op === "GT" ? ">" : "<"} ${val}${ruleUnit(src)}${ms ? ` pdt ${ms} ms` : ""}`);
+    const cond = { src, op, val, ms, link: "END" };
+    i += 4;
+    if (i < p.length) {
+      cond.link = (p[i] === "OR" || p[i] === "OU") ? "OR" : "AND";
+      out.push(cond.link === "OR" ? "OU" : "ET");
+      i += 1;
+    }
+    conds.push(cond);
+  }
+  if (conds.length) { ruleConds = conds; renderRule(); }
+  return `ARMÉ : ${out.join(" ")}`;
+}
+
+$("btnDisarm").onclick = () => send("ARM,DISARM");
+$("btnDfu").onclick = () => send("BOOT,DFU");
+$("btnFire").onclick = () => {
+  if (confirm("Tester la mise à feu maintenant ?")) send("PYRO,FIRE_NOW");
+};
+$("btnSend").onclick = () => {
+  const cmd = $("cmdInput").value.trim();
+  if (cmd) { send(cmd); $("cmdInput").value = ""; }
+};
+$("cmdInput").addEventListener("keydown", e => { if (e.key === "Enter") $("btnSend").click(); });
+
+// --- Boîte noire (event log) ---
+const logRead = { active: false, slot: null, header: null, rows: [], expected: 0 };
+
+function handleLogListLine(text) {
+  if (text === "LOG,END") {
+    $("logStatus").textContent = logSlotsFound ? "" : "Aucun déclenchement enregistré";
+    return;
+  }
+  // LOG,SLOT,<i>,<seq>,<trigger_ms>,<count>,<pre_count>
+  const p = text.split(",");
+  const [slot, seq, trigMs, count, preCount] = [p[2], p[3], p[4], p[5], p[6]];
+  logSlotsFound = true;
+  const row = document.createElement("div");
+  row.className = "row";
+  const durS = (count / 400).toFixed(1);
+  row.innerHTML = `<span>Déclenchement #${seq} — slot ${slot} · ${count} pts (~${durS} s) · trig t+${(trigMs/1000).toFixed(1)} s</span>`;
+  const btn = document.createElement("button");
+  btn.textContent = "Télécharger CSV";
+  btn.onclick = () => startLogRead(slot, seq);
+  row.appendChild(btn);
+  $("logSlots").appendChild(row);
+}
+
+let logSlotsFound = false;
+
+function startLogRead(slot, seq) {
+  logRead.active = true;
+  logRead.slot = slot;
+  logRead.seq = seq;
+  logRead.header = null;
+  logRead.rows = [];
+  $("logStatus").textContent = `Lecture déclenchement #${seq}…`;
+  send(`LOG,READ,${slot}`);
+}
+
+function handleLogLine(text) {
+  if (text.startsWith("LOG,BEGIN")) {
+    // LOG,BEGIN,<slot>,<seq>,<trigger_ms>,<count>,<pre_count>
+    const p = text.split(",");
+    logRead.header = { slot: p[2], seq: p[3], triggerMs: +p[4], count: +p[5], preCount: +p[6] };
+    logRead.expected = +p[5];
+    return;
+  }
+  if (text.startsWith("L,")) {
+    logRead.rows.push(text.slice(2));
+    if (logRead.rows.length % 200 === 0) {
+      $("logStatus").textContent = `Lecture… ${logRead.rows.length}/${logRead.expected}`;
+    }
+    return;
+  }
+  if (text.startsWith("LOG,END")) {
+    logRead.active = false;
+    const h = logRead.header || {};
+    const csv = ["ms,dist_raw_mm,dist_filt_mm,init_ax,init_ay,init_az,resp_ax,resp_ay,resp_az",
+      `# declenchement seq=${h.seq} slot=${h.slot} trigger_ms=${h.triggerMs} pre_count=${h.preCount}`,
+      ...logRead.rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `boitenoire-${h.seq || "x"}-${new Date().toISOString().slice(0,19).replace(/[:T]/g,"")}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    $("logStatus").textContent = `Déclenchement #${h.seq} : ${logRead.rows.length} points exportés`;
+    log(`Déclenchement #${h.seq} téléchargé (${logRead.rows.length} points)`, "sys");
+  }
+}
+
+$("btnLogList").onclick = () => {
+  $("logSlots").innerHTML = "";
+  logSlotsFound = false;
+  $("logStatus").textContent = "Recherche…";
+  send("LOG,LIST");
+};
+$("btnLogClear").onclick = () => {
+  if (confirm("Effacer tous les déclenchements enregistrés ?")) {
+    $("logSlots").innerHTML = "";
+    send("LOG,CLEAR");
+  }
+};
+
+// --- Mise à jour firmware (OTA — Nordic Secure DFU BLE) ---
+const DFU_SERVICE = 0xfe59;
+const DFU_CTRL   = "8ec90001-f315-4f60-9fb8-838830daea50";
+const DFU_PACKET = "8ec90002-f315-4f60-9fb8-838830daea50";
+const DFU_PACKET_SIZE = 20;
+
+const dfu = { pkg: null };
+
+function dfuStatus(text) { $("dfuStatus").textContent = text; }
+function dfuProgress(pct) {
+  const el = $("dfuProgress");
+  el.style.display = pct == null ? "none" : "block";
+  if (pct != null) el.value = pct;
+}
+
+// CRC32 (polynôme standard, comme zlib/nrfutil)
+const crcTable = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(data, crc = 0) {
+  crc = ~crc >>> 0;
+  for (let i = 0; i < data.length; i++) crc = (crcTable[(crc ^ data[i]) & 0xff] ^ (crc >>> 8)) >>> 0;
+  return ~crc >>> 0;
+}
+
+// Lecture ZIP minimale (entrées Stored ou Deflate)
+async function unzip(buf) {
+  const bytes = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("ZIP invalide (EOCD introuvable)");
+  const count = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const files = {};
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(off, true) !== 0x02014b50) throw new Error("ZIP invalide (central dir)");
+    const method = dv.getUint16(off + 10, true);
+    const compSize = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true);
+    const extraLen = dv.getUint16(off + 30, true);
+    const commentLen = dv.getUint16(off + 32, true);
+    const localOff = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(off + 46, off + 46 + nameLen));
+    const lNameLen = dv.getUint16(localOff + 26, true);
+    const lExtraLen = dv.getUint16(localOff + 28, true);
+    const dataOff = localOff + 30 + lNameLen + lExtraLen;
+    let data = bytes.slice(dataOff, dataOff + compSize);
+    if (method === 8) {
+      const ds = new DecompressionStream("deflate-raw");
+      const stream = new Blob([data]).stream().pipeThrough(ds);
+      data = new Uint8Array(await new Response(stream).arrayBuffer());
+    } else if (method !== 0) {
+      throw new Error(`Méthode ZIP non gérée: ${method}`);
+    }
+    files[name] = data;
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+
+async function parseDfuPackage(file) {
+  const files = await unzip(await file.arrayBuffer());
+  if (!files["manifest.json"]) throw new Error("manifest.json absent du zip");
+  const manifest = JSON.parse(new TextDecoder().decode(files["manifest.json"]));
+  const app = manifest.manifest && manifest.manifest.application;
+  if (!app) throw new Error("Package sans image application");
+  const dat = files[app.dat_file], bin = files[app.bin_file];
+  if (!dat || !bin) throw new Error("Fichiers .dat/.bin absents du zip");
+  return { dat, bin };
+}
+
+$("dfuFile").onchange = async () => {
+  const f = $("dfuFile").files[0];
+  dfu.pkg = null;
+  if (!f) { $("btnDfuStart").disabled = true; return; }
+  try {
+    dfu.pkg = await parseDfuPackage(f);
+    dfuStatus(`Package OK — app ${(dfu.pkg.bin.length / 1024).toFixed(0)} Ko`);
+    $("btnDfuStart").disabled = false;
+  } catch (e) {
+    dfuStatus(`Package invalide: ${e.message}`);
+    $("btnDfuStart").disabled = true;
+  }
+};
+
+$("btnDfuStart").onclick = async () => {
+  if (!dfu.pkg) return;
+  $("btnDfuStart").disabled = true;
+  try {
+    let server = null;
+    if (rxChar && device) {
+      // Boîtier connecté : reboot en DFU puis reconnexion silencieuse
+      // (le bootloader garde la même adresse BLE — pas de second appairage)
+      const dev = device;
+      dfuStatus("Redémarrage en mode DFU…");
+      log("> BOOT,DFU", "tx");
+      try {
+        await rxChar.writeValue(new TextEncoder().encode("BOOT,DFU\n"));
+      } catch (_) {
+        // Le boîtier reset avant la fin de l'écriture GATT : attendu
+      }
+      await new Promise(r => {
+        if (!dev.gatt.connected) return r();
+        dev.addEventListener("gattserverdisconnected", r, { once: true });
+        setTimeout(r, 5000);
+      });
+      for (let i = 0; i < 15 && !server; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        dfuStatus(`Reconnexion au bootloader… (${i + 1}/15)`);
+        try { server = await dev.gatt.connect(); } catch (_) {}
+      }
+    }
+    if (!server) {
+      // Boîtier déjà en DFU ou reconnexion impossible : sélecteur classique
+      dfuStatus("Choisir UWBR_DFU…");
+      const dev = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [DFU_SERVICE] }],
+        optionalServices: [DFU_SERVICE],
+      });
+      server = await dev.gatt.connect();
+    }
+    await dfuUpload(dfu.pkg, server);
+  } catch (e) {
+    dfuStatus(`Échec DFU: ${e.message}`);
+    dfuProgress(null);
+    log(`DFU: ${e.message}`, "rx err");
+  } finally {
+    $("btnDfuStart").disabled = !dfu.pkg;
+  }
+};
+
+async function dfuUpload(pkg, server) {
+  const service = await server.getPrimaryService(DFU_SERVICE);
+  const ctrl = await service.getCharacteristic(DFU_CTRL);
+  const packet = await service.getCharacteristic(DFU_PACKET);
+
+  let pendingResolve = null;
+  const responses = [];
+  await ctrl.startNotifications();
+  ctrl.addEventListener("characteristicvaluechanged", ev => {
+    const v = new Uint8Array(ev.target.value.buffer);
+    if (pendingResolve) { const r = pendingResolve; pendingResolve = null; r(v); }
+    else responses.push(v);
+  });
+
+  function request(opcode, payload = []) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pendingResolve = null; reject(new Error(`timeout op 0x${opcode.toString(16)}`)); }, 10000);
+      const settle = v => {
+        clearTimeout(timer);
+        if (v[0] !== 0x60 || v[1] !== opcode) return reject(new Error(`réponse inattendue [${v}]`));
+        if (v[2] !== 0x01) return reject(new Error(`op 0x${opcode.toString(16)} → erreur ${v[2]}${v[2] === 0x05 ? " (signature/version rejetée)" : ""}`));
+        resolve(v.slice(3));
+      };
+      if (responses.length) settle(responses.shift());
+      else pendingResolve = settle;
+      ctrl.writeValue(new Uint8Array([opcode, ...payload])).catch(reject);
+    });
+  }
+
+  const u32 = v => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+  const rd32 = (a, o) => (a[o] | (a[o+1] << 8) | (a[o+2] << 16) | (a[o+3] << 24)) >>> 0;
+
+  async function writeData(data, onChunk) {
+    for (let i = 0; i < data.length; i += DFU_PACKET_SIZE) {
+      await packet.writeValueWithoutResponse(data.subarray(i, i + DFU_PACKET_SIZE));
+      // pacing: macOS/CoreBluetooth perd des paquets WWR envoyés trop vite
+      await new Promise(r => setTimeout(r, 5));
+      if (onChunk && (i / DFU_PACKET_SIZE) % 16 === 0) onChunk(i);
+    }
+  }
+
+  // PRN = 0 : pas de notifications CRC intermédiaires
+  await request(0x02, [0, 0]);
+
+  // Objet 1 : init packet (.dat)
+  dfuStatus("Envoi de l'init packet…");
+  await request(0x01, [0x01, ...u32(pkg.dat.length)]);
+  await writeData(pkg.dat);
+  let r = await request(0x03);
+  if (rd32(r, 0) !== pkg.dat.length || rd32(r, 4) !== crc32(pkg.dat)) throw new Error("CRC init packet");
+  await request(0x04); // execute (vérifie la signature)
+
+  // Objet 2 : firmware (.bin) par tranches de max_size
+  const sel = await request(0x06, [0x02]);
+  const maxSize = rd32(sel, 0);
+  let crc = 0;
+  for (let off = 0; off < pkg.bin.length; off += maxSize) {
+    const chunk = pkg.bin.subarray(off, Math.min(off + maxSize, pkg.bin.length));
+    const expectCrc = crc32(chunk, crc);
+    let ok = false;
+    for (let retry = 0; retry < 3 && !ok; retry++) {
+      await request(0x01, [0x02, ...u32(chunk.length)]); // CREATE recommence l'objet
+      await writeData(chunk, i => {
+        const pct = ((off + i) / pkg.bin.length) * 100;
+        dfuProgress(pct);
+        dfuStatus(`Transfert… ${((off + i) / 1024).toFixed(0)} / ${(pkg.bin.length / 1024).toFixed(0)} Ko`);
+      });
+      r = await request(0x03);
+      ok = rd32(r, 0) === off + chunk.length && rd32(r, 4) === expectCrc;
+      if (!ok) log(`DFU: retry chunk @${off}`, "sys");
+    }
+    if (!ok) throw new Error(`CRC firmware @${off}`);
+    crc = expectCrc;
+    await request(0x04);
+  }
+  dfuProgress(100);
+  dfuStatus("Mise à jour terminée — le boîtier redémarre");
+  log("DFU terminé, nouveau firmware actif", "sys");
+  setTimeout(() => dfuProgress(null), 3000);
+}
+</script>
+</body>
+</html>
