@@ -684,9 +684,22 @@ async function dfuUpload(pkg, server) {
   const ctrl = await service.getCharacteristic(DFU_CTRL);
   const packet = await service.getCharacteristic(DFU_PACKET);
 
+  /* Web Bluetooth n'autorise qu'une opération GATT à la fois ; sur certains
+   * OS un write « sans réponse » encore en vol fait échouer l'op suivante
+   * avec « GATT operation already in progress ». On réessaie. */
+  async function gattOp(fn, tries = 8) {
+    for (let i = 0; ; i++) {
+      try { return await fn(); }
+      catch (e) {
+        if (i >= tries - 1 || !/already in progress|in progress|busy/i.test(e.message)) throw e;
+        await new Promise(r => setTimeout(r, 50 * (i + 1)));
+      }
+    }
+  }
+
   let pendingResolve = null;
   const responses = [];
-  await ctrl.startNotifications();
+  await gattOp(() => ctrl.startNotifications());
   ctrl.addEventListener("characteristicvaluechanged", ev => {
     const v = new Uint8Array(ev.target.value.buffer);
     if (pendingResolve) { const r = pendingResolve; pendingResolve = null; r(v); }
@@ -704,7 +717,7 @@ async function dfuUpload(pkg, server) {
       };
       if (responses.length) settle(responses.shift());
       else pendingResolve = settle;
-      ctrl.writeValue(new Uint8Array([opcode, ...payload])).catch(reject);
+      gattOp(() => ctrl.writeValue(new Uint8Array([opcode, ...payload]))).catch(reject);
     });
   }
 
@@ -713,7 +726,8 @@ async function dfuUpload(pkg, server) {
 
   async function writeData(data, onChunk) {
     for (let i = 0; i < data.length; i += DFU_PACKET_SIZE) {
-      await packet.writeValueWithoutResponse(data.subarray(i, i + DFU_PACKET_SIZE));
+      const part = data.subarray(i, i + DFU_PACKET_SIZE);
+      await gattOp(() => packet.writeValueWithoutResponse(part));
       // pacing: macOS/CoreBluetooth perd des paquets WWR envoyés trop vite
       await new Promise(r => setTimeout(r, 5));
       if (onChunk && (i / DFU_PACKET_SIZE) % 16 === 0) onChunk(i);
