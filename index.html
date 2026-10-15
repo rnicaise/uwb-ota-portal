@@ -142,7 +142,8 @@
     <button id="btnDfu" disabled>Redémarrer en DFU</button>
   </div>
   <div class="note">Chaque condition doit rester vraie pendant sa durée (0 = immédiat).
-    ET = conditions simultanées (prioritaire sur OU). Inclinaison de la veste par rapport à la verticale (fw v11+).
+    ET = conditions simultanées (prioritaire sur OU). Inclinaison de la veste : par rapport à la verticale,
+    ou par rapport à l'orientation au moment de l'armement (« réf. armement », fw v12+).
     Après armement, le boîtier reset et saute la fenêtre BLE au boot suivant tant qu'il est armé.</div>
 </div>
 
@@ -337,7 +338,7 @@ $("btnSetTxpwr").onclick = () => send(`CFG,TXPWR,${$("selTxpwr").value}`);
 // --- Builder de logique de déclenchement ---
 let ruleConds = [{ src: "DIST", op: "GT", val: 2.0, ms: 0, link: "END" }];
 
-function ruleUnit(src) { return src === "TILT" ? "°" : "m"; }
+function ruleUnit(src) { return src === "DIST" ? "m" : "°"; }
 
 function renderRule() {
   const host = $("ruleRows");
@@ -354,6 +355,7 @@ function renderRule() {
       <select data-i="${i}" data-k="src">
         <option value="DIST"${c.src === "DIST" ? " selected" : ""}>Distance</option>
         <option value="TILT"${c.src === "TILT" ? " selected" : ""}>Inclinaison</option>
+        <option value="TILTREL"${c.src === "TILTREL" ? " selected" : ""}>Inclinaison (réf. armement)</option>
       </select>
       <select data-i="${i}" data-k="op">
         <option value="GT"${c.op === "GT" ? " selected" : ""}>&gt;</option>
@@ -410,7 +412,7 @@ function ruleToText(payload) {
   for (let i = 0; i < p.length;) {
     const src = p[i], op = p[i + 1], val = parseFloat(p[i + 2]), ms = parseInt(p[i + 3], 10);
     if (!src || !op || isNaN(val) || isNaN(ms)) break;
-    out.push(`${src === "TILT" ? "Incl." : "Dist."} ${op === "GT" ? ">" : "<"} ${val}${ruleUnit(src)}${ms ? ` pdt ${ms} ms` : ""}`);
+    out.push(`${src === "TILT" ? "Incl." : src === "TILTREL" ? "Incl. rel." : "Dist."} ${op === "GT" ? ">" : "<"} ${val}${ruleUnit(src)}${ms ? ` pdt ${ms} ms` : ""}`);
     const cond = { src, op, val, ms, link: "END" };
     i += 4;
     if (i < p.length) {
