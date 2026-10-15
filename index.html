@@ -137,7 +137,8 @@
     <button id="btnDisarm" disabled>Désarmer</button>
   </div>
   <div class="row">
-    <button id="btnFire" class="danger" disabled>Tester la mise à feu</button>
+    <button id="btnFireCountdown" class="danger" disabled>Tir test (compte à rebours 10 s)</button>
+    <button id="btnFire" class="danger" disabled>Tir test immédiat</button>
     <button id="btnDfu" disabled>Redémarrer en DFU</button>
   </div>
   <div class="note">Chaque condition doit rester vraie pendant sa durée (0 = immédiat).
@@ -196,7 +197,7 @@ let device = null, rxChar = null, rxBuffer = "";
 const $ = id => document.getElementById(id);
 const logEl = $("log");
 const connectedButtons = ["btnDisconnect","btnRefresh","btnSetProfile","btnSetTxpwr",
-  "btnRuleAdd","btnRuleArm","btnDisarm","btnFire","btnDfu","btnSend","cmdInput",
+  "btnRuleAdd","btnRuleArm","btnDisarm","btnFire","btnFireCountdown","btnDfu","btnSend","cmdInput",
   "btnSetName","nameInput","btnLogList","btnLogClear"];
 
 if (!navigator.bluetooth) $("unsupported").style.display = "block";
@@ -423,8 +424,12 @@ function ruleToText(payload) {
 
 $("btnDisarm").onclick = () => send("ARM,DISARM");
 $("btnDfu").onclick = () => send("BOOT,DFU");
+$("btnFireCountdown").onclick = () => {
+  if (confirm("Tir test avec compte à rebours : le boîtier de tir bipera pendant 10 s puis tirera. Le compte à rebours démarre après la déconnexion. Continuer ?"))
+    send("PYRO,FIRE");
+};
 $("btnFire").onclick = () => {
-  if (confirm("Tester la mise à feu maintenant ?")) send("PYRO,FIRE_NOW");
+  if (confirm("Tir test IMMÉDIAT (sans compte à rebours), dès la déconnexion. Continuer ?")) send("PYRO,FIRE_NOW");
 };
 $("btnSend").onclick = () => {
   const cmd = $("cmdInput").value.trim();
