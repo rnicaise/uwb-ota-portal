@@ -153,6 +153,7 @@
   </div>
   <div class="row">
     <button id="btnDfuStart" disabled>Mettre à jour</button>
+    <button id="btnRespDfu" disabled>Boîtier de tir → DFU</button>
     <span id="dfuStatus" class="note"></span>
   </div>
   <div class="row">
@@ -160,7 +161,10 @@
   </div>
   <div class="note">Package .zip signé (nrfutil). Étape 1 : redémarre le boîtier en mode DFU.
     Étape 2 : choisir « UWBR_DFU » dans la fenêtre Bluetooth pour flasher.
-    Les captures boîte noire peuvent être perdues pendant la mise à jour.</div>
+    Les captures boîte noire peuvent être perdues pendant la mise à jour.
+    <br>Pour le boîtier de tir (responder) : connecté à la veste, cliquer « Boîtier de tir → DFU »,
+    se déconnecter (l'ordre part en UWB, le boîtier de tir redémarre en DFU), puis choisir le .zip responder
+    et « Mettre à jour » sans être connecté → sélectionner « UWBR_DFU ».</div>
 </div>
 
 <div class="card">
@@ -197,7 +201,7 @@ let device = null, rxChar = null, rxBuffer = "";
 const $ = id => document.getElementById(id);
 const logEl = $("log");
 const connectedButtons = ["btnDisconnect","btnRefresh","btnSetProfile","btnSetTxpwr",
-  "btnRuleAdd","btnRuleArm","btnDisarm","btnFire","btnFireCountdown","btnDfu","btnSend","cmdInput",
+  "btnRuleAdd","btnRuleArm","btnDisarm","btnFire","btnFireCountdown","btnDfu","btnRespDfu","btnSend","cmdInput",
   "btnSetName","nameInput","btnLogList","btnLogClear"];
 
 if (!navigator.bluetooth) $("unsupported").style.display = "block";
@@ -424,6 +428,10 @@ function ruleToText(payload) {
 
 $("btnDisarm").onclick = () => send("ARM,DISARM");
 $("btnDfu").onclick = () => send("BOOT,DFU");
+$("btnRespDfu").onclick = () => {
+  if (confirm("Envoyer le boîtier de tir en mode DFU ? L'ordre partira en UWB après la déconnexion ; le boîtier de tir annoncera « UWBR_DFU » pendant ~2 min."))
+    send("RESP,DFU");
+};
 $("btnFireCountdown").onclick = () => {
   if (confirm("Tir test avec compte à rebours : le boîtier de tir bipera pendant 10 s puis tirera. Le compte à rebours démarre après la déconnexion. Continuer ?"))
     send("PYRO,FIRE");
