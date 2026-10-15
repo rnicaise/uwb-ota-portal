@@ -159,12 +159,10 @@
   <div class="row">
     <progress id="dfuProgress" max="100" value="0" style="width:100%;display:none"></progress>
   </div>
-  <div class="note">Package .zip signé (nrfutil). Étape 1 : redémarre le boîtier en mode DFU.
-    Étape 2 : choisir « UWBR_DFU » dans la fenêtre Bluetooth pour flasher.
-    Les captures boîte noire peuvent être perdues pendant la mise à jour.
-    <br>Pour le boîtier de tir (responder) : connecté à la veste, cliquer « Boîtier de tir → DFU »,
-    se déconnecter (l'ordre part en UWB, le boîtier de tir redémarre en DFU), puis choisir le .zip responder
-    et « Mettre à jour » sans être connecté → sélectionner « UWBR_DFU ».</div>
+  <div class="note">Package .zip signé (nrfutil). Veste : « Redémarrer en DFU » puis choisir « UWBR_DFU ».
+    Boîtier de tir : « Boîtier de tir → DFU » (déconnexion automatique, ses LEDs s'éteignent),
+    puis choisir le .zip responder, « Mettre à jour » et sélectionner « TIR_DFU ».
+    Si rien ne se passe pendant 2 min, le boîtier revient en mode normal tout seul.</div>
 </div>
 
 <div class="card">
@@ -428,16 +426,32 @@ function ruleToText(payload) {
 
 $("btnDisarm").onclick = () => send("ARM,DISARM");
 $("btnDfu").onclick = () => send("BOOT,DFU");
+
+/* L'initiator exécute les ordres relayés (tir, DFU responder) APRÈS la
+ * déconnexion BLE (le ranging UWB est en pause pendant la connexion).
+ * On déconnecte donc automatiquement dès que l'ACK est reçu. */
+async function sendThenDisconnect(cmd, nextMsg) {
+  await send(cmd);
+  await new Promise(r => setTimeout(r, 800)); // laisse l'ACK arriver
+  device?.gatt.disconnect();
+  if (nextMsg) log(nextMsg, "sys");
+}
+
 $("btnRespDfu").onclick = () => {
-  if (confirm("Envoyer le boîtier de tir en mode DFU ? L'ordre partira en UWB après la déconnexion ; le boîtier de tir annoncera « UWBR_DFU » pendant ~2 min."))
-    send("RESP,DFU");
+  if (!confirm("Mettre à jour le boîtier de tir ?\n\nIl va passer en mode mise à jour (déconnexion automatique). Ensuite : choisir le .zip responder et cliquer « Mettre à jour ».")) return;
+  sendThenDisconnect("RESP,DFU",
+    "✔ Ordre envoyé — le boîtier de tir passe en mode mise à jour (ses LEDs s'éteignent).");
+  $("dfuStatus").textContent = "→ Choisissez le .zip responder puis « Mettre à jour » et sélectionnez « TIR_DFU » (fenêtre de 2 min).";
+  document.getElementById("dfuFile").scrollIntoView({ behavior: "smooth", block: "center" });
 };
 $("btnFireCountdown").onclick = () => {
-  if (confirm("Tir test avec compte à rebours : le boîtier de tir bipera pendant 10 s puis tirera. Le compte à rebours démarre après la déconnexion. Continuer ?"))
-    send("PYRO,FIRE");
+  if (confirm("Tir test avec compte à rebours : déconnexion automatique, puis le boîtier de tir bipe pendant 10 s et tire. Continuer ?"))
+    sendThenDisconnect("PYRO,FIRE",
+      "✔ Compte à rebours lancé — 10 s de bips sur le boîtier de tir, puis tir.");
 };
 $("btnFire").onclick = () => {
-  if (confirm("Tir test IMMÉDIAT (sans compte à rebours), dès la déconnexion. Continuer ?")) send("PYRO,FIRE_NOW");
+  if (confirm("Tir test IMMÉDIAT (sans compte à rebours) : déconnexion automatique puis tir. Continuer ?"))
+    sendThenDisconnect("PYRO,FIRE_NOW", "✔ Tir immédiat déclenché.");
 };
 $("btnSend").onclick = () => {
   const cmd = $("cmdInput").value.trim();
